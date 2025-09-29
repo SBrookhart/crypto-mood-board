@@ -1,35 +1,54 @@
 /**
- * INDICATORS API (with env-priority RPCs)
- * - Prices: CoinGecko (public, no key)
- * - Gas: Prefer ETH_RPC_URL / BASE_RPC_URL (from Vercel env). If absent or throttled, fall back to public RPCs.
- * - Multiple methods: feeHistory → gasPrice → latest.baseFeePerGas
- * - Timeouts + no-store caching
+ * INDICATORS API (self-contained conversion, no external helpers)
+ * - Prices: CoinGecko (public)
+ * - Gas: multi-endpoint, multi-method, with robust hex→gwei conversion
+ * - Returns provenance (which endpoint/method succeeded)
  */
-
-import { hexToGweiSafe } from '../../lib/format';
 
 export const config = { api: { bodyParser: false } };
 
-// 1) Prices endpoint (public)
 const CG_URL =
   'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true';
 
-// 2) RPC endpoint lists (env-first, then public fallbacks)
+// Prefer env-provided RPCs, then fall back to public ones
 const ETH_RPCS = [
-  process.env.ETH_RPC_URL,                          // your dedicated provider (recommended)
+  process.env.ETH_RPC_URL,
   'https://cloudflare-eth.com',
   'https://rpc.ankr.com/eth',
   'https://ethereum.publicnode.com',
 ].filter(Boolean);
 
 const BASE_RPCS = [
-  process.env.BASE_RPC_URL,                         // your dedicated provider (recommended)
+  process.env.BASE_RPC_URL,
   'https://mainnet.base.org',
   'https://rpc.ankr.com/base',
   'https://base.publicnode.com',
 ].filter(Boolean);
 
-// --- Helper: RPC call with timeout and no-store cache
+/** Convert hex (or number/string) wei → gwei, returns a JS Number with 3 decimals */
+function toGwei(value) {
+  try {
+    // Accept 0x-hex, decimal string, number, or BigInt
+    let wei;
+    if (typeof value === 'string' && value.startsWith('0x')) {
+      wei = BigInt(value);
+    } else if (typeof value === 'string') {
+      wei = BigInt(value);
+    } else if (typeof value === 'number') {
+      wei = BigInt(Math.floor(value));
+    } else if (typeof value === 'bigint') {
+      wei = value;
+    } else {
+      return null;
+    }
+    const gweiTimes1e3 = (wei * 1000n) / 1_000_000_000n; // scale to preserve 3 decimals
+    const asNumber = Number(gweiTimes1e3) / 1000;
+    return Number.isFinite(asNumber) ? asNumber : null;
+  } catch {
+    return null;
+  }
+}
+
 async function rpcCall(endpoint, method, params = [], timeoutMs = 8000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -39,7 +58,7 @@ async function rpcCall(endpoint, method, params = [], timeoutMs = 8000) {
       headers: {
         'content-type': 'application/json',
         'accept': 'application/json',
-        'user-agent': 'mood-board/1.1'
+        'user-agent': 'mood-board/1.2'
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
       signal: ctrl.signal,
@@ -55,30 +74,28 @@ async function rpcCall(endpoint, method, params = [], timeoutMs = 8000) {
   }
 }
 
-// --- Parsers for gas estimates
 function feeHistoryToGwei(result) {
   try {
     const arr = result?.baseFeePerGas;
     if (Array.isArray(arr) && arr.length) {
-      const last = arr[arr.length - 1];
-      const g = hexToGweiSafe(last);
-      return g && g > 0 ? g : null;
+      const last = arr[arr.length - 1]; // hex string
+      const g = toGwei(last);
+      return g != null && g > 0 ? g : null;
     }
   } catch {}
   return null;
 }
 
 function gasPriceToGwei(result) {
-  const g = hexToGweiSafe(result);
-  return g && g > 0 ? g : null;
+  const g = toGwei(result);
+  return g != null && g > 0 ? g : null;
 }
 
 function latestBlockToGwei(result) {
-  const g = hexToGweiSafe(result?.baseFeePerGas);
-  return g && g > 0 ? g : null;
+  const g = toGwei(result?.baseFeePerGas);
+  return g != null && g > 0 ? g : null;
 }
 
-// --- Try many endpoints & methods; return first good reading + provenance
 async function getGasGwei(endpoints) {
   const tries = [
     { method: 'eth_feeHistory', params: ['0x5', 'latest', []], parse: feeHistoryToGwei },
@@ -95,7 +112,7 @@ async function getGasGwei(endpoints) {
           return { gwei, via: { endpoint: ep, method } };
         }
       } catch {
-        // try next combo
+        // continue
       }
     }
   }
@@ -105,10 +122,7 @@ async function getGasGwei(endpoints) {
 export default async function handler(_req, res) {
   try {
     // Prices
-    const priceResp = await fetch(CG_URL, {
-      headers: { accept: 'application/json' },
-      cache: 'no-store'
-    });
+    const priceResp = await fetch(CG_URL, { headers: { accept: 'application/json' }, cache: 'no-store' });
     const cg = await priceResp.json().catch(() => ({}));
 
     const btcUsd = cg?.bitcoin?.usd ?? null;
@@ -116,7 +130,7 @@ export default async function handler(_req, res) {
     const ethUsd = cg?.ethereum?.usd ?? null;
     const ethChange24h = cg?.ethereum?.usd_24h_change ?? null;
 
-    // Gas with robust strategy (env-first)
+    // Gas
     const [ethGas, baseGas] = await Promise.all([
       getGasGwei(ETH_RPCS),
       getGasGwei(BASE_RPCS)
@@ -125,10 +139,7 @@ export default async function handler(_req, res) {
     res.status(200).json({
       btcUsd, btcChange24h, ethUsd, ethChange24h,
       ethGasGwei: ethGas.gwei, baseGasGwei: baseGas.gwei,
-      sources: {
-        eth: ethGas.via,
-        base: baseGas.via
-      }
+      sources: { eth: ethGas.via, base: baseGas.via }
     });
   } catch (e) {
     res.status(200).json({
