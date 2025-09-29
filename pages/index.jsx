@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { computeMood } from '../lib/mood';
 import { fmtUsd } from '../lib/format';
+import ContextMethodology from "../components/ContextMethodology";
 
 function Card({ title, value, sub }) {
   return (
@@ -119,6 +120,9 @@ export default function Home() {
             <footer style={{ marginTop: 28, color: '#9ca3af', fontSize: 12 }}>
               Data: CoinGecko (prices), Cloudflare/Ankr/PublicNode & Base RPCs (gas). Public endpoints can rate-limit; refresh if a source temporarily fails.
             </footer>
+
+            {/* Context & Methodology section */}
+            <ContextMethodology />
           </>
         )}
       </div>
