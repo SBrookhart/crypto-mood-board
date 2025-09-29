@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { computeMood } from '../lib/mood.js';
+import { computeMood } from '../lib/mood';
+import { fmtUsd } from '../lib/format';
 
 function Card({ title, value, sub }) {
   return (
@@ -30,18 +31,15 @@ export default function Home() {
     try {
       const r = await fetch('/api/indicators');
       const j = await r.json();
-      if (r.ok) {
-        setInd(j);
-        const m = computeMood({
-          btcChange: j.btcChange24h ?? 0,
-          ethChange: j.ethChange24h ?? 0,
-          ethGasGwei: j.ethGasGwei ?? 0,
-          baseGasGwei: j.baseGasGwei ?? 0
-        });
-        setMood(m);
-      } else {
-        throw new Error(j.error || 'Failed to load');
-      }
+      if (!r.ok) throw new Error(j?.error || 'Failed to load');
+      setInd(j);
+      const m = computeMood({
+        btcChange: j.btcChange24h ?? 0,
+        ethChange: j.ethChange24h ?? 0,
+        ethGasGwei: j.ethGasGwei ?? undefined,
+        baseGasGwei: j.baseGasGwei ?? undefined
+      });
+      setMood(m);
     } catch (e) {
       setErr(e.message);
     } finally {
@@ -52,6 +50,9 @@ export default function Home() {
   useEffect(() => { load(); }, []);
 
   const bg = mood ? `radial-gradient(1200px 600px at 20% -10%, ${mood.color}22, #ffffff)` : '#fff';
+
+  const val = (n) => (n == null ? '—' : n);
+  const pct = (n) => (n == null ? '—' : `${Number(n).toFixed(2)}%`);
 
   return (
     <div style={{ minHeight: '100vh', background: bg, padding: 24, fontFamily: 'ui-sans-serif, system-ui' }}>
@@ -68,10 +69,7 @@ export default function Home() {
 
         {ind && mood && !loading && (
           <>
-            <section style={{
-              display: 'grid', gridTemplateColumns: '1fr', gap: 16,
-              marginBottom: 20
-            }}>
+            <section style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16, marginBottom: 20 }}>
               <div style={{
                 border: '2px solid #e5e7eb', borderRadius: 18, padding: 20,
                 background: '#ffffffcc', backdropFilter: 'blur(2px)'
@@ -96,28 +94,28 @@ export default function Home() {
             <section style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
               <Card
                 title="BTC"
-                value={`$${(ind.btcUsd ?? 0).toLocaleString()} (${(ind.btcChange24h ?? 0).toFixed(2)}%)`}
-                sub="24h price change"
+                value={`${fmtUsd(ind.btcUsd)} (${pct(ind.btcChange24h)})`}
+                sub="24h price change (CoinGecko)"
               />
               <Card
                 title="ETH"
-                value={`$${(ind.ethUsd ?? 0).toLocaleString()} (${(ind.ethChange24h ?? 0).toFixed(2)}%)`}
-                sub="24h price change"
+                value={`${fmtUsd(ind.ethUsd)} (${pct(ind.ethChange24h)})`}
+                sub="24h price change (CoinGecko)"
               />
               <Card
                 title="Ethereum Gas"
-                value={`${ind.ethGasGwei} gwei`}
-                sub="Cloudflare Ethereum Gateway"
+                value={`${val(ind.ethGasGwei)} gwei`}
+                sub="Cloudflare Ethereum RPC"
               />
               <Card
                 title="Base Gas"
-                value={`${ind.baseGasGwei} gwei`}
-                sub="Base public RPC"
+                value={`${val(ind.baseGasGwei)} gwei`}
+                sub="Base mainnet RPC"
               />
             </section>
 
             <footer style={{ marginTop: 28, color: '#9ca3af', fontSize: 12 }}>
-              Data: CoinGecko (prices/24h change), Cloudflare Ethereum Gateway (eth_gasPrice), Base RPC (eth_gasPrice).
+              Data: CoinGecko (prices), Cloudflare Ethereum Gateway & Base RPC (gas).
             </footer>
           </>
         )}
