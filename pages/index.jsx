@@ -29,7 +29,7 @@ export default function Home() {
     setLoading(true);
     setErr(null);
     try {
-      const r = await fetch('/api/indicators');
+      const r = await fetch('/api/indicators', { cache: 'no-store' });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || 'Failed to load');
       setInd(j);
@@ -51,8 +51,10 @@ export default function Home() {
 
   const bg = mood ? `radial-gradient(1200px 600px at 20% -10%, ${mood.color}22, #ffffff)` : '#fff';
 
-  const val = (n) => (n == null ? '—' : n);
   const pct = (n) => (n == null ? '—' : `${Number(n).toFixed(2)}%`);
+  const hostOrDash = (u) => {
+    try { return u ? new URL(u).host : '—'; } catch { return '—'; }
+  };
 
   return (
     <div style={{ minHeight: '100vh', background: bg, padding: 24, fontFamily: 'ui-sans-serif, system-ui' }}>
@@ -104,18 +106,18 @@ export default function Home() {
               />
               <Card
                 title="Ethereum Gas"
-                value={`${val(ind.ethGasGwei)} gwei`}
-                sub="Cloudflare Ethereum RPC"
+                value={`${ind.ethGasGwei == null ? '—' : ind.ethGasGwei} gwei`}
+                sub={`Source: ${hostOrDash(ind.sources?.eth?.endpoint)} · ${ind.sources?.eth?.method || '—'}`}
               />
               <Card
                 title="Base Gas"
-                value={`${val(ind.baseGasGwei)} gwei`}
-                sub="Base mainnet RPC"
+                value={`${ind.baseGasGwei == null ? '—' : ind.baseGasGwei} gwei`}
+                sub={`Source: ${hostOrDash(ind.sources?.base?.endpoint)} · ${ind.sources?.base?.method || '—'}`}
               />
             </section>
 
             <footer style={{ marginTop: 28, color: '#9ca3af', fontSize: 12 }}>
-              Data: CoinGecko (prices), Cloudflare Ethereum Gateway & Base RPC (gas).
+              Data: CoinGecko (prices), Cloudflare/Ankr/PublicNode & Base RPCs (gas). Public endpoints can rate-limit; refresh if a source temporarily fails.
             </footer>
           </>
         )}
